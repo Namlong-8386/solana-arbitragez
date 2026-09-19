@@ -1,0 +1,22 @@
+{
+  "name": "solana-arbitrage-bot",
+  "version": "1.0.0",
+  "description": "Automated Multi-DEX Solana Arbitrage Signal Bot for Telegram",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "dev": "ts-node-dev --respawn src/index.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.8",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "grammy": "^1.34.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}
