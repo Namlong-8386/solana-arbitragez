@@ -5,7 +5,7 @@ import { TokenInfo } from '../types/arbitrage';
 export class TokenDiscoveryService {
   private activeTokens: Map<string, TokenInfo> = new Map();
   private lastUpdate: number = 0;
-  private readonly REFRESH_INTERVAL_MS = 10 * 60 * 1000; // Refresh the full list every 10 minutes
+  private readonly REFRESH_INTERVAL_MS = 10 * 60 * 1000; // Check for new tokens every 10 minutes
 
   // Base reserve tokens always present
   private baseTokens: TokenInfo[] = [
@@ -38,7 +38,8 @@ export class TokenDiscoveryService {
   }
 
   /**
-   * Fetch top liquid, high-volume tokens on Solana dynamically
+   * Discover additional tokens without dropping the tokens already accepted.
+   * Jupiter's strict list is used as the source, with basic scam/junk filters.
    */
   public async fetchDynamicTopTokens(): Promise<TokenInfo[]> {
     const now = Date.now();
@@ -46,45 +47,47 @@ export class TokenDiscoveryService {
       return Array.from(this.activeTokens.values());
     }
 
-    console.log('[TokenDiscovery] Auto-discovering top active tokens on Solana...');
+    console.log('[TokenDiscovery] Auto-discovering new safe tokens on Solana...');
 
     try {
       // 1. Fetch from Jupiter strict list
-      const response = await axios.get<TokenInfo[]>(CONFIG.JUPITER_TOKENS_API, { timeout: 8000 });
+      const response = await axios.get<Array<Partial<TokenInfo>>>(CONFIG.JUPITER_TOKENS_API, { timeout: 8000 });
       if (Array.isArray(response.data)) {
-        // Filter out tokens with valid symbol and mint address
-        const validTokens = response.data.filter(t => t.address && t.symbol && t.decimals);
-        
-        // Replace the dynamic portion on every refresh so removed/stale tokens
-        // do not remain in the scan forever. There is intentionally no cap:
-        // every valid token returned by Jupiter is eligible for scanning.
-        const refreshedTokens = new Map<string, TokenInfo>();
-        this.baseTokens.forEach(token => refreshedTokens.set(token.address, token));
+        // Keep accepted tokens across refreshes. A refresh only adds new safe
+        // tokens and updates metadata; it never replaces the active list.
+        response.data.forEach(t => {
+          if (!this.isSafeToken(t)) {
+            // Remove a token already being tracked if a later refresh marks it
+            // with a suspicious tag/name. Base reserve tokens are protected.
+            if (t.address && !this.isBaseToken(t.address)) {
+              this.activeTokens.delete(t.address);
+            }
+            return;
+          }
 
-        validTokens.forEach(t => {
-          refreshedTokens.set(t.address, {
-            symbol: t.symbol,
-            name: t.name,
+          this.activeTokens.set(t.address, {
+            symbol: t.symbol.trim(),
+            name: (t.name || t.symbol).trim(),
             address: t.address,
             decimals: t.decimals,
             logoURI: t.logoURI,
             tags: t.tags || []
           });
         });
-
-        this.activeTokens = refreshedTokens;
       }
     } catch (err: any) {
-      console.warn('[TokenDiscovery] Failed to refresh the full Jupiter token list; keeping the current list:', err.message);
+      console.warn('[TokenDiscovery] Failed to discover new tokens; keeping the current safe list:', err.message);
       // Keep the last successful full list when a refresh fails. On startup,
       // use the fallback list so the scanner can still begin.
       if (this.activeTokens.size <= this.baseTokens.length) {
-        this.getFallbackTokens().forEach(t => this.activeTokens.set(t.address, t));
+        this.getFallbackTokens()
+          .filter(token => this.isSafeToken(token))
+          .forEach(t => this.activeTokens.set(t.address, t));
       }
     }
 
     this.lastUpdate = now;
-    console.log(`[TokenDiscovery] Active token list dynamically updated (${this.activeTokens.size} tokens total).`);
+    console.log(`[TokenDiscovery] Safe token list retained and expanded (${this.activeTokens.size} tokens total).`);
     return Array.from(this.activeTokens.values());
   }
 
@@ -94,6 +97,42 @@ export class TokenDiscoveryService {
 
   public getTokenByMint(mint: string): TokenInfo | undefined {
     return this.activeTokens.get(mint);
+  }
+
+  private isBaseToken(address: string): boolean {
+    return this.baseTokens.some(token => token.address === address);
+  }
+
+  /**
+   * This is a safety filter, not a guarantee that a token cannot be a scam.
+   * The strict Jupiter source removes most unverified tokens; the checks below
+   * reject malformed metadata and common scam/junk markers before scanning.
+   */
+  private isSafeToken(token: Partial<TokenInfo>): token is TokenInfo {
+    const symbol = typeof token.symbol === 'string' ? token.symbol.trim() : '';
+    const name = typeof token.name === 'string' ? token.name.trim() : '';
+    const address = typeof token.address === 'string' ? token.address.trim() : '';
+    const decimals = token.decimals;
+    const tags = Array.isArray(token.tags)
+      ? token.tags.filter((tag): tag is string => typeof tag === 'string').map(tag => tag.toLowerCase())
+      : [];
+    const searchableText = `${symbol} ${name}`.toLowerCase();
+    const blockedMarkers = /\b(scam|fake|honeypot|malicious|rugpull|rug-pull|testnet|test token)\b/i;
+    const blockedTags = new Set(['scam', 'unsafe', 'honeypot', 'malicious', 'rugpull', 'rug-pull', 'deprecated', 'fake']);
+
+    return Boolean(
+      address &&
+      /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) &&
+      symbol &&
+      symbol.length <= 30 &&
+      name.length <= 100 &&
+      typeof decimals === 'number' &&
+      Number.isInteger(decimals) &&
+      decimals >= 0 &&
+      decimals <= 18 &&
+      !blockedMarkers.test(searchableText) &&
+      !tags.some(tag => blockedTags.has(tag))
+    );
   }
 
   private getFallbackTokens(): TokenInfo[] {
