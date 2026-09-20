@@ -107,7 +107,7 @@ export class TelegramBotService {
         `<b>1. Cách thức hoạt động:</b>\n` +
         `Bot liên tục gọi báo giá từ Jupiter Swap API để so sánh đường đi Swap của cùng 1 token trên nhiều sàn DEX khác nhau (Cross-DEX & Triangular).\n\n` +
         `<b>2. Khi nào có Tín hiệu?</b>\n` +
-        `Khi Net Profit (Lợi Nhuận Ròng) > Ngưỡng Min Profit % cài đặt (mặc định > 0.3%), Bot sẽ tự động bắn thông báo kèm nút **Jupiter 1-Click Swap**.\n\n` +
+        `Khi Net Profit (Lợi Nhuận Ròng) > Ngưỡng Min Profit % cài đặt (mặc định > 0.3%), Bot sẽ gửi tín hiệu để bạn kiểm tra lại route, giá và slippage trên Jupiter.\n\n` +
         `<b>3. Lệnh thao tác nhanh:</b>\n` +
         `/start - Mở Menu chính\n` +
         `/status - Trạng thái hệ thống\n` +

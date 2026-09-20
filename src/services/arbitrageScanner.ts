@@ -14,6 +14,7 @@ export class ArbitrageScannerService extends EventEmitter {
   private lastScanTimestamp: number = 0;
   private timerId: NodeJS.Timeout | null = null;
   private recentOpportunityIds: Set<string> = new Set();
+  private scanInProgress: boolean = false;
 
   constructor() {
     super();
@@ -23,7 +24,18 @@ export class ArbitrageScannerService extends EventEmitter {
     if (this.isScanning) return;
     this.isScanning = true;
     console.log('[ArbitrageScanner] Automated Scanner Started 24/7.');
-    this.scanLoop();
+    void this.scanLoop();
+  }
+
+  public async scanNow(): Promise<number> {
+    const wasScanning = this.isScanning;
+    if (!wasScanning) this.isScanning = true;
+
+    try {
+      return await this.executeScanPass();
+    } finally {
+      if (!wasScanning) this.isScanning = false;
+    }
   }
 
   public stopScanner(): void {
@@ -70,19 +82,32 @@ export class ArbitrageScannerService extends EventEmitter {
     if (!this.isScanning) return;
 
     try {
-      this.lastScanTimestamp = Date.now();
-      // Ensure dynamic tokens are loaded
-      const tokens = await tokenDiscoveryService.fetchDynamicTopTokens();
-      
-      // Perform scan pass across dynamic tokens
-      await this.scanDynamicTokens(tokens);
+      await this.executeScanPass();
 
     } catch (err: any) {
       console.error('[ArbitrageScanner] Error during scan loop:', err.message);
     } finally {
       if (this.isScanning) {
-        this.timerId = setTimeout(() => this.scanLoop(), this.scanIntervalMs);
+        const retryAfterMs = jupiterService.getRetryAfterMs();
+        this.timerId = setTimeout(
+          () => this.scanLoop(),
+          Math.max(this.scanIntervalMs, retryAfterMs)
+        );
       }
+    }
+  }
+
+  private async executeScanPass(): Promise<number> {
+    if (this.scanInProgress) return 0;
+    this.scanInProgress = true;
+
+    try {
+      this.lastScanTimestamp = Date.now();
+      const tokens = await tokenDiscoveryService.fetchDynamicTopTokens();
+      await this.scanDynamicTokens(tokens);
+      return tokens.length;
+    } finally {
+      this.scanInProgress = false;
     }
   }
 
@@ -111,7 +136,7 @@ export class ArbitrageScannerService extends EventEmitter {
     );
 
     for (const targetToken of targetTokens) {
-      if (!this.isScanning) break;
+      if (!this.isScanning || jupiterService.isRateLimited()) break;
 
       // 1. Check Triangular Route: SOL -> TargetToken -> USDC -> SOL
       await this.checkTriangularArbitrage(solToken, targetToken, usdcToken, inputLamports);
@@ -136,19 +161,19 @@ export class ArbitrageScannerService extends EventEmitter {
     try {
       // Step 1: SOL -> Token B
       const quote1 = await jupiterService.getQuote(tokenA.address, tokenB.address, inputLamports);
-      if (!quote1 || !quote1.outAmount) return;
+      const amountB = this.getConservativeOutputAmount(quote1);
+      if (!quote1 || amountB === null) return;
 
       // Step 2: Token B -> USDC
-      const amountB = parseInt(quote1.outAmount, 10);
       const quote2 = await jupiterService.getQuote(tokenB.address, tokenC.address, amountB);
-      if (!quote2 || !quote2.outAmount) return;
+      const amountC = this.getConservativeOutputAmount(quote2);
+      if (!quote2 || amountC === null) return;
 
       // Step 3: USDC -> SOL
-      const amountC = parseInt(quote2.outAmount, 10);
       const quote3 = await jupiterService.getQuote(tokenC.address, tokenA.address, amountC);
-      if (!quote3 || !quote3.outAmount) return;
+      const outputLamports = this.getConservativeOutputAmount(quote3);
+      if (!quote3 || outputLamports === null) return;
 
-      const outputLamports = parseInt(quote3.outAmount, 10);
       this.evaluateOpportunity(
         'TRIANGULAR',
         tokenA,
@@ -174,15 +199,13 @@ export class ArbitrageScannerService extends EventEmitter {
     try {
       // Quote A -> B
       const quoteAB = await jupiterService.getQuote(tokenA.address, tokenB.address, inputLamports);
-      if (!quoteAB || !quoteAB.outAmount) return;
-
-      const amountB = parseInt(quoteAB.outAmount, 10);
+      const amountB = this.getConservativeOutputAmount(quoteAB);
+      if (!quoteAB || amountB === null) return;
 
       // Quote B -> A
       const quoteBA = await jupiterService.getQuote(tokenB.address, tokenA.address, amountB);
-      if (!quoteBA || !quoteBA.outAmount) return;
-
-      const outputLamports = parseInt(quoteBA.outAmount, 10);
+      const outputLamports = this.getConservativeOutputAmount(quoteBA);
+      if (!quoteBA || outputLamports === null) return;
       const dexes = [...jupiterService.extractDexLabels(quoteAB), ...jupiterService.extractDexLabels(quoteBA)];
 
       this.evaluateOpportunity(
@@ -222,6 +245,9 @@ export class ArbitrageScannerService extends EventEmitter {
 
     if (netProfitPercent >= this.minProfitPercent) {
       const uniqueDexes = Array.from(new Set(dexes));
+      // A same-venue round trip is not a cross-DEX arbitrage signal.
+      if (uniqueDexes.length < 2) return;
+
       const buyDEX = uniqueDexes[0] || 'Raydium';
       const sellDEX = uniqueDexes[1] || uniqueDexes[0] || 'Orca Whirlpool';
 
@@ -260,6 +286,14 @@ export class ArbitrageScannerService extends EventEmitter {
       // Emit signal event for Telegram bot
       this.emit('signal', opportunity);
     }
+  }
+
+  private getConservativeOutputAmount(
+    quote: { outAmount?: string; otherAmountThreshold?: string } | null
+  ): number | null {
+    if (!quote) return null;
+    const amount = Number.parseInt(quote.otherAmountThreshold || quote.outAmount || '', 10);
+    return Number.isSafeInteger(amount) && amount > 0 ? amount : null;
   }
 }
 

@@ -68,7 +68,10 @@ export class TokenDiscoveryService {
 
     try {
       // 1. Fetch from Jupiter strict list
-      const response = await axios.get<JupiterTokenRecord[]>(CONFIG.JUPITER_TOKENS_API, { timeout: 8000 });
+      const response = await axios.get<JupiterTokenRecord[]>(CONFIG.JUPITER_TOKENS_API, {
+        timeout: 8000,
+        headers: CONFIG.JUPITER_API_KEY ? { 'x-api-key': CONFIG.JUPITER_API_KEY } : undefined
+      });
       if (!Array.isArray(response.data) || response.data.length === 0) {
         throw new Error('Jupiter returned an empty or invalid verified token list');
       }
@@ -96,9 +99,7 @@ export class TokenDiscoveryService {
       // Keep the last successful full list when a refresh fails. On startup,
       // use the fallback list so the scanner can still begin.
       if (this.activeTokens.size <= this.baseTokens.length) {
-        this.getFallbackTokens()
-          .filter(token => this.isSafeToken(token))
-          .forEach(t => this.activeTokens.set(t.address, t));
+        this.getFallbackTokens().forEach(t => this.activeTokens.set(t.address, t));
       }
     }
 
@@ -162,7 +163,7 @@ export class TokenDiscoveryService {
 
   private normalizeToken(record: JupiterTokenRecord): TokenInfo | null {
     const address = record.address || record.id;
-    if (!address || !record.symbol || !record.decimals) return null;
+    if (!address || !record.symbol || typeof record.decimals !== 'number') return null;
 
     return {
       symbol: record.symbol.trim(),

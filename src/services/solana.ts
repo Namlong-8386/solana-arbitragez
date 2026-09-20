@@ -21,7 +21,10 @@ export class SolanaService {
     try {
       const response = await axios.get(
         `https://api.jup.ag/price/v3?ids=${CONFIG.WRAPPED_SOL_MINT}`,
-        { timeout: 4000 }
+        {
+          timeout: 4000,
+          headers: CONFIG.JUPITER_API_KEY ? { 'x-api-key': CONFIG.JUPITER_API_KEY } : undefined
+        }
       );
       const data = response.data?.[CONFIG.WRAPPED_SOL_MINT];
       if (data && typeof data.usdPrice === 'number') {
