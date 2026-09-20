@@ -229,9 +229,9 @@ export class TelegramBotService {
 
     const msg = 
       `🔥 <b>DANH SÁCH DYNAMIC TOKENS ĐANG THEO DÕI (${tokens.length})</b>\n\n` +
-      `Bot tự động cập nhật Top Tokens có volume lớn từ Jupiter & DexScreener:\n\n` +
+      `Bot tự động cập nhật toàn bộ token hợp lệ từ Jupiter:\n\n` +
       `${tokenSymbols}\n\n` +
-      `💡 <i>Danh sách này tự động refresh mỗi 10 phút để nắm bắt trend coin mới nhất.</i>`;
+      `💡 <i>Danh sách đầy đủ tự động refresh mỗi 10 phút; scanner tiếp tục quét liên tục toàn bộ danh sách.</i>`;
 
     await ctx.reply(msg, { parse_mode: 'HTML' });
   }

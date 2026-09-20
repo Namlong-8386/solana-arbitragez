@@ -5,7 +5,7 @@ import { TokenInfo } from '../types/arbitrage';
 export class TokenDiscoveryService {
   private activeTokens: Map<string, TokenInfo> = new Map();
   private lastUpdate: number = 0;
-  private readonly REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 mins
+  private readonly REFRESH_INTERVAL_MS = 10 * 60 * 1000; // Refresh the full list every 10 minutes
 
   // Base reserve tokens always present
   private baseTokens: TokenInfo[] = [
@@ -42,7 +42,7 @@ export class TokenDiscoveryService {
    */
   public async fetchDynamicTopTokens(): Promise<TokenInfo[]> {
     const now = Date.now();
-    if (now - this.lastUpdate < this.REFRESH_INTERVAL_MS && this.activeTokens.size > 5) {
+    if (now - this.lastUpdate < this.REFRESH_INTERVAL_MS && this.activeTokens.size > this.baseTokens.length) {
       return Array.from(this.activeTokens.values());
     }
 
@@ -55,30 +55,32 @@ export class TokenDiscoveryService {
         // Filter out tokens with valid symbol and mint address
         const validTokens = response.data.filter(t => t.address && t.symbol && t.decimals);
         
-        // Select top tokens (popular ones like JUP, BONK, WIF, POPCAT, RENDER, RAY, ORCA, METEORA, etc.)
-        const prioritySymbols = new Set(['JUP', 'BONK', 'WIF', 'POPCAT', 'RENDER', 'RAY', 'ORCA', 'MEW', 'PYTH', 'KMNO', 'TNSR', 'JTO', 'DRIFT', 'W', 'BOME']);
-        
-        const priorityTokens = validTokens.filter(t => prioritySymbols.has(t.symbol.toUpperCase()));
-        const standardTokens = validTokens.slice(0, CONFIG.MAX_DYNAMIC_TOKENS * 2);
+        // Replace the dynamic portion on every refresh so removed/stale tokens
+        // do not remain in the scan forever. There is intentionally no cap:
+        // every valid token returned by Jupiter is eligible for scanning.
+        const refreshedTokens = new Map<string, TokenInfo>();
+        this.baseTokens.forEach(token => refreshedTokens.set(token.address, token));
 
-        // Merge priority & top tokens into map
-        [...this.baseTokens, ...priorityTokens, ...standardTokens].forEach(t => {
-          if (t.address && !this.activeTokens.has(t.address)) {
-            this.activeTokens.set(t.address, {
-              symbol: t.symbol,
-              name: t.name,
-              address: t.address,
-              decimals: t.decimals,
-              logoURI: t.logoURI,
-              tags: t.tags || []
-            });
-          }
+        validTokens.forEach(t => {
+          refreshedTokens.set(t.address, {
+            symbol: t.symbol,
+            name: t.name,
+            address: t.address,
+            decimals: t.decimals,
+            logoURI: t.logoURI,
+            tags: t.tags || []
+          });
         });
+
+        this.activeTokens = refreshedTokens;
       }
     } catch (err: any) {
-      console.warn('[TokenDiscovery] Failed to fetch Jupiter token list, using default token list:', err.message);
-      // Add standard fallback popular tokens if network request fails
-      this.getFallbackTokens().forEach(t => this.activeTokens.set(t.address, t));
+      console.warn('[TokenDiscovery] Failed to refresh the full Jupiter token list; keeping the current list:', err.message);
+      // Keep the last successful full list when a refresh fails. On startup,
+      // use the fallback list so the scanner can still begin.
+      if (this.activeTokens.size <= this.baseTokens.length) {
+        this.getFallbackTokens().forEach(t => this.activeTokens.set(t.address, t));
+      }
     }
 
     this.lastUpdate = now;

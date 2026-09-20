@@ -105,7 +105,7 @@ export class ArbitrageScannerService extends EventEmitter {
 
     const inputLamports = solanaService.solToLamports(this.tradeAmountSOL);
 
-    // Pick a subset of target tokens dynamically to scan in this pass
+    // Scan every discovered target token in this pass
     const targetTokens = tokens.filter(
       t => t.address !== CONFIG.WRAPPED_SOL_MINT && t.address !== CONFIG.USDC_MINT
     );
