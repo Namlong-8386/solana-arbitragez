@@ -5,6 +5,9 @@ export interface TokenInfo {
   decimals: number;
   logoURI?: string;
   dailyVolume?: number;
+  liquidityUSD?: number;
+  organicScore?: number;
+  isVerified?: boolean;
   tags?: string[];
 }
 

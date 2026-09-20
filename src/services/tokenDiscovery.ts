@@ -2,6 +2,23 @@ import axios from 'axios';
 import { CONFIG } from '../config';
 import { TokenInfo } from '../types/arbitrage';
 
+type JupiterTokenRecord = Partial<TokenInfo> & {
+  id?: string;
+  icon?: string;
+  isVerified?: boolean;
+  organicScore?: number;
+  liquidity?: number;
+  stats24h?: {
+    volume?: number;
+  };
+  audit?: {
+    isSus?: boolean;
+    mintAuthorityDisabled?: boolean;
+    freezeAuthorityDisabled?: boolean;
+    topHoldersPercentage?: number;
+  };
+};
+
 export class TokenDiscoveryService {
   private activeTokens: Map<string, TokenInfo> = new Map();
   private lastUpdate: number = 0;
@@ -51,28 +68,27 @@ export class TokenDiscoveryService {
 
     try {
       // 1. Fetch from Jupiter strict list
-      const response = await axios.get<Array<Partial<TokenInfo>>>(CONFIG.JUPITER_TOKENS_API, { timeout: 8000 });
+      const response = await axios.get<JupiterTokenRecord[]>(CONFIG.JUPITER_TOKENS_API, { timeout: 8000 });
+      if (!Array.isArray(response.data) || response.data.length === 0) {
+        throw new Error('Jupiter returned an empty or invalid verified token list');
+      }
+
       if (Array.isArray(response.data)) {
         // Keep accepted tokens across refreshes. A refresh only adds new safe
         // tokens and updates metadata; it never replaces the active list.
         response.data.forEach(t => {
-          if (!this.isSafeToken(t)) {
+          const token = this.normalizeToken(t);
+          if (!token || !this.isSafeToken(t)) {
             // Remove a token already being tracked if a later refresh marks it
             // with a suspicious tag/name. Base reserve tokens are protected.
-            if (t.address && !this.isBaseToken(t.address)) {
-              this.activeTokens.delete(t.address);
+            const address = t.address || t.id;
+            if (address && !this.isBaseToken(address) && t.audit?.isSus === true) {
+              this.activeTokens.delete(address);
             }
             return;
           }
 
-          this.activeTokens.set(t.address, {
-            symbol: t.symbol.trim(),
-            name: (t.name || t.symbol).trim(),
-            address: t.address,
-            decimals: t.decimals,
-            logoURI: t.logoURI,
-            tags: t.tags || []
-          });
+          this.activeTokens.set(token.address, token);
         });
       }
     } catch (err: any) {
@@ -109,12 +125,15 @@ export class TokenDiscoveryService {
    * reject malformed metadata and common scam/junk markers before scanning.
    */
   private isSafeToken(token: Partial<TokenInfo>): token is TokenInfo {
-    const symbol = typeof token.symbol === 'string' ? token.symbol.trim() : '';
-    const name = typeof token.name === 'string' ? token.name.trim() : '';
-    const address = typeof token.address === 'string' ? token.address.trim() : '';
+    const record = token as JupiterTokenRecord;
+    const symbol = typeof record.symbol === 'string' ? record.symbol.trim() : '';
+    const name = typeof record.name === 'string' ? record.name.trim() : '';
+    const address = typeof (record.address || record.id) === 'string'
+      ? (record.address || record.id)!.trim()
+      : '';
     const decimals = token.decimals;
-    const tags = Array.isArray(token.tags)
-      ? token.tags.filter((tag): tag is string => typeof tag === 'string').map(tag => tag.toLowerCase())
+    const tags = Array.isArray(record.tags)
+      ? record.tags.filter((tag): tag is string => typeof tag === 'string').map(tag => tag.toLowerCase())
       : [];
     const searchableText = `${symbol} ${name}`.toLowerCase();
     const blockedMarkers = /\b(scam|fake|honeypot|malicious|rugpull|rug-pull|testnet|test token)\b/i;
@@ -130,9 +149,33 @@ export class TokenDiscoveryService {
       Number.isInteger(decimals) &&
       decimals >= 0 &&
       decimals <= 18 &&
+      record.isVerified === true &&
+      record.audit?.isSus !== true &&
+      typeof record.liquidity === 'number' &&
+      record.liquidity >= CONFIG.MIN_TOKEN_LIQUIDITY_USD &&
+      typeof record.organicScore === 'number' &&
+      record.organicScore >= CONFIG.MIN_ORGANIC_SCORE &&
       !blockedMarkers.test(searchableText) &&
       !tags.some(tag => blockedTags.has(tag))
     );
+  }
+
+  private normalizeToken(record: JupiterTokenRecord): TokenInfo | null {
+    const address = record.address || record.id;
+    if (!address || !record.symbol || !record.decimals) return null;
+
+    return {
+      symbol: record.symbol.trim(),
+      name: (record.name || record.symbol).trim(),
+      address,
+      decimals: record.decimals,
+      logoURI: record.logoURI || record.icon,
+      dailyVolume: record.stats24h?.volume,
+      liquidityUSD: record.liquidity,
+      organicScore: record.organicScore,
+      isVerified: record.isVerified,
+      tags: record.tags || []
+    };
   }
 
   private getFallbackTokens(): TokenInfo[] {

@@ -17,7 +17,10 @@ export class JupiterService {
       const response = await axios.get<JupiterSwapQuote>(url, { timeout: 4000 });
       return response.data;
     } catch (err: any) {
-      // Quietly return null if quote fails or no route exists
+      const status = err.response?.status;
+      if (status === 429 || status >= 500) {
+        console.warn(`[Jupiter] Quote request failed (${status}) for ${inputMint.slice(0, 6)}... -> ${outputMint.slice(0, 6)}...`);
+      }
       return null;
     }
   }

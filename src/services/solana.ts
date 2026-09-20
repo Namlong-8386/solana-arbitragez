@@ -20,12 +20,12 @@ export class SolanaService {
 
     try {
       const response = await axios.get(
-        `https://api.jup.ag/price/v2?ids=${CONFIG.WRAPPED_SOL_MINT}`,
+        `https://api.jup.ag/price/v3?ids=${CONFIG.WRAPPED_SOL_MINT}`,
         { timeout: 4000 }
       );
-      const data = response.data?.data?.[CONFIG.WRAPPED_SOL_MINT];
-      if (data && data.price) {
-        this.cachedSolPriceUSD = parseFloat(data.price);
+      const data = response.data?.[CONFIG.WRAPPED_SOL_MINT];
+      if (data && typeof data.usdPrice === 'number') {
+        this.cachedSolPriceUSD = data.usdPrice;
         this.lastPriceFetch = now;
       }
     } catch (err) {

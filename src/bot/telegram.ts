@@ -55,9 +55,9 @@ export class TelegramBotService {
         `Welcome <b>${ctx.from?.first_name || 'Trader'}</b>!\n` +
         `Bot tự động quét chênh lệch giá (Arbitrage) 24/7 trên hơn <b>10 sàn DEX Solana</b> (Raydium, Orca, Meteora, Phoenix, Lifinity, OpenBook...).\n\n` +
         `🔥 <b>Tính năng nổi bật:</b>\n` +
-        `• <b>Dynamic Token Discovery:</b> Tự động quét Top Coin có volume sôi động nhất.\n` +
-        `• <b>Net Profit Calculation:</b> Tự động trừ phí Solana Priority Fee & Swap Fee.\n` +
-        `• <b>Instant 1-Click Swap:</b> Gửi tín hiệu kèm Link Jupiter swap chốt lời ngay.\n\n` +
+        `• <b>Dynamic Token Discovery:</b> Chỉ nhận token verified có thanh khoản và hoạt động thật.\n` +
+        `• <b>Net Profit Calculation:</b> Dùng output bảo thủ sau slippage và trừ phí ước tính.\n` +
+        `• <b>Trade Link:</b> Mở route trên Jupiter để kiểm tra trước khi tự quyết định giao dịch.\n\n` +
         `👇 Sử dụng bảng điều khiển bên dưới để tương tác:`;
 
       const keyboard = new InlineKeyboard()
@@ -89,11 +89,11 @@ export class TelegramBotService {
     // /scan command
     this.bot.command('scan', async (ctx) => {
       await ctx.reply('⏳ <i>Đang quét chênh lệch giá tức thì trên mainnet Solana...</i>', { parse_mode: 'HTML' });
-      const tokens = await tokenDiscoveryService.fetchDynamicTopTokens();
+      const tokenCount = await arbitrageScannerService.scanNow();
       const state = arbitrageScannerService.getBotState();
       await ctx.reply(
         `✅ <b>Quét hoàn tất!</b>\n` +
-        `Đã phân tích <b>${tokens.length} Dynamic Tokens</b> qua <b>Raydium, Orca, Meteora, Phoenix, Lifinity...</b>\n` +
+        `Đã phân tích <b>${tokenCount} Dynamic Tokens</b> qua <b>Raydium, Orca, Meteora, Phoenix, Lifinity...</b>\n` +
         `Tổng tín hiệu phát hiện hôm nay: <b>${state.signalsDetectedCount}</b>\n` +
         `Ngưỡng Lãi tối thiểu: <b>${state.minProfitPercent}%</b>`,
         { parse_mode: 'HTML' }
@@ -105,7 +105,7 @@ export class TelegramBotService {
       const helpMsg = 
         `📖 <b>HƯỚNG DẪN SỬ DỤNG BOT SIGNAL ARBITRAGE SOLANA</b>\n\n` +
         `<b>1. Cách thức hoạt động:</b>\n` +
-        `Bot liên tục gọi báo giá từ Jupiter API v6 để so sánh đường đi Swap của cùng 1 token trên nhiều sàn DEX khác nhau (Cross-DEX & Triangular).\n\n` +
+        `Bot liên tục gọi báo giá từ Jupiter Swap API để so sánh đường đi Swap của cùng 1 token trên nhiều sàn DEX khác nhau (Cross-DEX & Triangular).\n\n` +
         `<b>2. Khi nào có Tín hiệu?</b>\n` +
         `Khi Net Profit (Lợi Nhuận Ròng) > Ngưỡng Min Profit % cài đặt (mặc định > 0.3%), Bot sẽ tự động bắn thông báo kèm nút **Jupiter 1-Click Swap**.\n\n` +
         `<b>3. Lệnh thao tác nhanh:</b>\n` +
@@ -181,7 +181,7 @@ export class TelegramBotService {
       `🔥 <b>NET PROFIT:</b> <b>+${opp.netProfitPercent.toFixed(2)}%</b> (<code>+${opp.netProfitSOL.toFixed(4)} SOL</code> / <b>+$${netUSD.toFixed(2)}</b>)\n` +
       `⏰ <b>Thời gian:</b> <code>${new Date(opp.timestamp).toLocaleTimeString()}</code>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `👇 <i>Bấm nút bên dưới để Swap chốt lời ngay trên Jupiter:</i>`;
+      `👇 <i>Mở route trên Jupiter để kiểm tra lại giá và slippage trước khi giao dịch:</i>`;
 
     const keyboard = new InlineKeyboard()
       .url('🚀 SWAP NGAY TRÊN JUPITER', opp.jupiterSwapLink)
